@@ -324,7 +324,7 @@ function makeRef(){
 
 /* ---------- builder mode (Quote / Presentation / Portfolio) ---------- */
 var MODES = { quote:'Quote Builder', presentation:'Presentation Builder', portfolio:'Portfolio Builder' };
-var MODE_FOLDERS = { quote:'quotes', presentation:'Presentations', portfolio:'Portfolios' };
+var MODE_FOLDERS = { quote:'Quotes', presentation:'Presentations', portfolio:'Portfolios' };
 var MODE_LABEL = { quote:'Quote', presentation:'Presentation', portfolio:'Portfolio' };
 var MODE = (location.hash||'').replace('#','');
 if(!MODES[MODE]) MODE = 'quote';
@@ -1061,7 +1061,7 @@ document.getElementById('downloadBtn').addEventListener('click', function(){ gen
 /* ---------- publish to GitHub Pages ---------- */
 /* Routing is fixed (not secret); only the token is sensitive and lives on-device only, never in this file. */
 var GH_OWNER = 'DargieEntertainment';
-var GH_REPO  = 'Dargie-Entertainment';
+var GH_REPO  = 'Display';
 var GH_BRANCH = 'main';
 var GH_TOKEN_KEY = 'dargie_ghToken';
 function getToken(){
