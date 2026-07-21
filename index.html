@@ -215,10 +215,10 @@
 
   <!-- RECENT QUOTES -->
   <div class="step" id="recentBox" hidden>
-    <h2 style="justify-content:space-between"><span>Recent quotes</span>
+    <h2 style="justify-content:space-between"><span id="recentTitle">Recent quotes</span>
       <button type="button" id="rqClear" style="border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 12px;font:inherit;font-size:12px;color:var(--muted);cursor:pointer">Clear list</button>
     </h2>
-    <p class="hint">Quotes published from this device. Tap a title to open it, or copy the link to send it.</p>
+    <p class="hint">Published from this device. Tap a title to open it, or copy the link to send it.</p>
     <div id="rqList"></div>
   </div>
 
@@ -330,6 +330,8 @@ var MODE = (location.hash||'').replace('#','');
 if(!MODES[MODE]) MODE = 'quote';
 document.body.setAttribute('data-mode', MODE);
 document.getElementById('builderTitle').textContent = MODES[MODE];
+document.getElementById('recentTitle').textContent =
+  MODE==='presentation' ? 'Recent presentations' : (MODE==='portfolio' ? 'Recent portfolios' : 'Recent quotes');
 document.title = 'Dargie ' + MODES[MODE];
 (function(){
   var modeSel = document.getElementById('modeSel');
@@ -351,9 +353,8 @@ document.title = 'Dargie ' + MODES[MODE];
     document.getElementById('coverHint').textContent = 'This becomes the opening screen of the presentation.';
     document.getElementById('actsHint').textContent = 'Each entry showcases one offering. Add as many photos as you like (viewers click through them), and optionally a Vimeo video \u2014 if an act has both, the video floats over the corner of the photos. Photos only, video only, or both all work; the layout adapts automatically.';
     var introEl = document.getElementById('intro');
-    introEl.value = '';
-    introEl.placeholder = (MODE === 'presentation')
-      ? 'Dargie Entertainment is one of Australia\u2019s leading live entertainment companies, delivering world-class production shows, headline guest entertainers, and bespoke entertainment experiences across cruise lines, theatres, resorts, casinos, and corporate events. We see an exciting opportunity to collaborate with John Smith Entertainment by bringing our premium production shows to the Opera House in Sydney.'
+    introEl.value = (MODE === 'presentation')
+      ? 'Dargie Entertainment is one of Australia\u2019s leading live entertainment companies, delivering world-class production shows, headline guest entertainers, and bespoke entertainment experiences across cruise lines, theatres, resorts, casinos, and corporate events. We see an exciting opportunity to collaborate with you, by showcasing our premium Acts and Performances.'
       : 'Dargie Entertainment is one of Australia\u2019s leading live entertainment companies, delivering world-class production shows, headline guest entertainers, and bespoke entertainment experiences across cruise lines, theatres, resorts, casinos, and corporate events. We have handpicked some select talent from our Agency that we are excited to showcase to you.';
     var n = 1;
     document.querySelectorAll('.step').forEach(function(st){
@@ -743,9 +744,9 @@ function buildOutput(d){
       return '<div class="tile'+(hasP?' ph':'')+'" role="button" tabindex="0" data-i="'+i+'">'+tmedia+'<div class="tile-name">'+esc(s.head)+'</div></div>';
     }).join('');
     contentHtml =
-      '<div id="tileView" class="fadeblock"><div class="tile-grid">'+tiles+'</div>'+
-      '<div id="detailWrap" class="fadeblock" hidden><button type="button" id="detailClose">&#10005;&ensp;Close</button><div id="detailHost"></div></div>'+
-      '</div>'+
+      '<div id="tileView" class="fadeblock"><div class="tile-grid">'+tiles+
+      '<div id="detailWrap" hidden><button type="button" id="detailClose">&#10005;&ensp;Close</button><div id="detailHost"></div></div>'+
+      '</div></div>'+
       '<div id="fullView" class="fadeblock" hidden>'+scenes+'</div>';
     toggleBtnHtml = '<button type="button" id="viewToggle" class="view-toggle">Expand All</button>\n';
   }
@@ -761,7 +762,8 @@ function buildOutput(d){
   '.fadeblock.fout{opacity:0}\n'+
   '.view-toggle{position:fixed;right:22px;top:50%;transform:translateY(-50%);z-index:60;background:var(--red);color:#fff;border:0;border-radius:999px;padding:14px 20px;font-family:\'Manrope\',sans-serif;font-weight:800;font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;cursor:pointer;box-shadow:0 14px 40px rgba(240,29,79,.45)}\n'+
   '.view-toggle:hover{background:#D31343}\n'+
-  '#detailWrap{margin-top:36px}\n'+
+  '#detailWrap{grid-column:1/-1;margin:4px 0 8px}\n'+
+  '#detailHost{transition:opacity .3s ease}\n'+
   '#detailClose{display:block;margin-left:auto;margin-bottom:6px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);color:var(--soft);border-radius:999px;padding:9px 18px;font-family:\'Manrope\',sans-serif;font-weight:700;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}\n'+
   '#detailClose:hover{background:var(--red);border-color:var(--red);color:#fff}\n'+
   '#detailHost .scene{border-top:0}\n'+
@@ -774,8 +776,11 @@ function buildOutput(d){
   "toggle=document.getElementById('viewToggle'),grid=document.querySelector('.tile-grid');"+
   "if(!tileView||!fullView||!toggle)return;"+
   "var scenes=Array.prototype.slice.call(fullView.querySelectorAll('.scene'));"+
-  "var current=-1,expandedAll=false,busy=false;"+
-  "fullView.classList.add('fout');detailWrap.classList.add('fout');"+
+  "var tiles=Array.prototype.slice.call(grid.querySelectorAll('.tile'));"+
+  "var current=-1,expandedAll=false,busy=false,TOPPAD=110;"+
+  "fullView.classList.add('fout');"+
+  "function smoothTo(y){try{window.scrollTo({top:Math.max(0,y),behavior:'smooth'});}catch(e){window.scrollTo(0,Math.max(0,y));}}"+
+  "function pageY(el){var r=el.getBoundingClientRect();return r.top+(window.pageYOffset||document.documentElement.scrollTop||0);}"+
   "function show(el){el.hidden=false;requestAnimationFrame(function(){requestAnimationFrame(function(){el.classList.remove('fout');});});}"+
   "function hideEl(el,cb){el.classList.add('fout');setTimeout(function(){el.hidden=true;if(cb)cb();},370);}"+
   "function restoreScene(i){var sc=scenes[i];if(sc.parentNode===fullView)return;var next=null;"+
@@ -788,25 +793,57 @@ function buildOutput(d){
   "car._timer=setTimeout(tick,5000+Math.random()*2000);});}"+
   "function stopAuto(scope){Array.prototype.forEach.call(scope.querySelectorAll('.carousel'),function(car){"+
   "if(car._timer){clearTimeout(car._timer);car._timer=null;}});}"+
-  "function openDetail(i){if(busy||expandedAll)return;busy=true;stopAuto(detailHost);"+
-  "var doOpen=function(){if(current>=0)restoreScene(current);current=i;"+
-  "detailHost.appendChild(scenes[i]);scenes[i].classList.add('on');show(detailWrap);startAuto(detailHost);"+
-  "setTimeout(function(){busy=false;},400);"+
-  "try{detailWrap.scrollIntoView({behavior:'smooth',block:'start'});}catch(e){}};"+
-  "if(!detailWrap.hidden){hideEl(detailWrap,doOpen);}else{doOpen();}}"+
-  "function closeDetail(cb){stopAuto(detailHost);if(detailWrap.hidden){if(cb)cb();return;}"+
-  "hideEl(detailWrap,function(){if(current>=0)restoreScene(current);current=-1;if(cb)cb();});}"+
+  "function insertionRef(i){var top=tiles[i].offsetTop;"+
+  "for(var j=i+1;j<tiles.length;j++){if(tiles[j].offsetTop>top+5)return tiles[j];}return null;}"+
+  "function placeWrap(i){grid.insertBefore(detailWrap,insertionRef(i));}"+
+  "function expandWrap(){detailWrap.hidden=false;detailWrap.style.overflow='hidden';"+
+  "detailWrap.style.height='0px';detailWrap.getBoundingClientRect();"+
+  "detailWrap.style.transition='height .45s ease';detailWrap.style.height=detailWrap.scrollHeight+'px';"+
+  "setTimeout(function(){detailWrap.style.transition='';detailWrap.style.height='auto';detailWrap.style.overflow='';},480);}"+
+  "function collapseWrap(cb){detailWrap.style.overflow='hidden';detailWrap.style.transition='';"+
+  "detailWrap.style.height=detailWrap.scrollHeight+'px';detailWrap.getBoundingClientRect();"+
+  "detailWrap.style.transition='height .4s ease';detailWrap.style.height='0px';"+
+  "setTimeout(function(){detailWrap.hidden=true;detailWrap.style.transition='';detailWrap.style.height='';detailWrap.style.overflow='';if(cb)cb();},430);}"+
+  "function adjustHeight(){detailWrap.style.overflow='hidden';"+
+  "detailWrap.style.height=detailWrap.offsetHeight+'px';detailWrap.getBoundingClientRect();"+
+  "detailWrap.style.transition='height .4s ease';detailWrap.style.height=detailWrap.scrollHeight+'px';"+
+  "setTimeout(function(){detailWrap.style.transition='';detailWrap.style.height='auto';detailWrap.style.overflow='';},430);}"+
+  "function fadeHost(out,cb){detailHost.style.opacity=out?'0':'1';if(cb)setTimeout(cb,310);}"+
+  "function scrollToTile(i){smoothTo(pageY(tiles[i])-TOPPAD);}"+
+  "function openDetail(i){if(busy||expandedAll)return;"+
+  "if(current===i){closeDetail();return;}"+
+  "busy=true;stopAuto(detailHost);"+
+  "if(current<0){placeWrap(i);detailHost.style.opacity='0';"+
+  "detailHost.appendChild(scenes[i]);scenes[i].classList.add('on');current=i;"+
+  "expandWrap();fadeHost(false);startAuto(detailHost);scrollToTile(i);"+
+  "setTimeout(function(){busy=false;},520);}"+
+  "else if(insertionRef(current)===insertionRef(i)){"+
+  "fadeHost(true,function(){restoreScene(current);current=i;"+
+  "detailHost.appendChild(scenes[i]);scenes[i].classList.add('on');"+
+  "adjustHeight();fadeHost(false);startAuto(detailHost);scrollToTile(i);"+
+  "setTimeout(function(){busy=false;},460);});}"+
+  "else{fadeHost(true,function(){collapseWrap(function(){restoreScene(current);"+
+  "placeWrap(i);current=i;detailHost.appendChild(scenes[i]);scenes[i].classList.add('on');"+
+  "expandWrap();fadeHost(false);startAuto(detailHost);scrollToTile(i);"+
+  "setTimeout(function(){busy=false;},540);});});}"+
+  "}"+
+  "function closeDetail(cb){stopAuto(detailHost);"+
+  "if(current<0||detailWrap.hidden){current=-1;if(cb)cb();return;}"+
+  "busy=true;fadeHost(true,function(){collapseWrap(function(){"+
+  "restoreScene(current);current=-1;detailHost.style.opacity='1';busy=false;if(cb)cb();});});}"+
   "grid.addEventListener('click',function(e){var t=e.target;"+
-  "while(t&&t!==grid&&!(t.getAttribute&&t.getAttribute('data-i')))t=t.parentNode;"+
-  "if(t&&t!==grid)openDetail(parseInt(t.getAttribute('data-i'),10));});"+
+  "while(t&&t!==grid&&t!==detailWrap&&!(t.getAttribute&&t.getAttribute('data-i')))t=t.parentNode;"+
+  "if(t&&t!==grid&&t!==detailWrap)openDetail(parseInt(t.getAttribute('data-i'),10));});"+
   "grid.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){var t=e.target;"+
   "if(t&&t.getAttribute&&t.getAttribute('data-i')){e.preventDefault();openDetail(parseInt(t.getAttribute('data-i'),10));}}});"+
-  "document.getElementById('detailClose').addEventListener('click',function(){if(!busy){busy=true;closeDetail(function(){busy=false;});}});"+
+  "document.getElementById('detailClose').addEventListener('click',function(){if(!busy)closeDetail();});"+
   "toggle.addEventListener('click',function(){if(busy)return;busy=true;"+
   "if(!expandedAll){closeDetail(function(){hideEl(tileView,function(){show(fullView);startAuto(fullView);"+
-  "toggle.textContent='Collapse';expandedAll=true;busy=false;});});}"+
-  "else{stopAuto(fullView);hideEl(fullView,function(){show(tileView);toggle.textContent='Expand All';expandedAll=false;busy=false;});}"+
+  "toggle.textContent='Collapse';expandedAll=true;busy=false;smoothTo(pageY(fullView)-TOPPAD);});});}"+
+  "else{stopAuto(fullView);hideEl(fullView,function(){show(tileView);toggle.textContent='Expand All';expandedAll=false;busy=false;smoothTo(pageY(tileView)-TOPPAD);});}"+
   "});"+
+  "var rsz=null;window.addEventListener('resize',function(){clearTimeout(rsz);"+
+  "rsz=setTimeout(function(){if(current>=0&&!detailWrap.hidden)placeWrap(current);},250);});"+
   "})();";
 
   var pageJs =
@@ -1200,11 +1237,12 @@ function publish(){
   .then(function(){ publishBtn.disabled = false; });
 }
 /* ---------- recent quotes ---------- */
+function recentKey(){ return 'dargie_recent_' + MODE; }
 function loadRecent(){
-  try{ return JSON.parse(localStorage.getItem('dargie_recentQuotes')||'[]'); }catch(e){ return []; }
+  try{ return JSON.parse(localStorage.getItem(recentKey())||'[]'); }catch(e){ return []; }
 }
 function saveRecent(list){
-  try{ localStorage.setItem('dargie_recentQuotes', JSON.stringify(list)); }catch(e){}
+  try{ localStorage.setItem(recentKey(), JSON.stringify(list)); }catch(e){}
 }
 function renderRecent(){
   var list = loadRecent();
@@ -1221,7 +1259,7 @@ function renderRecent(){
                     '<div class="rq-meta"></div></div>'+
                     '<button type="button" class="rq-copy">Copy link</button>';
     row.querySelector('a').textContent = q.title || q.url;
-    row.querySelector('.rq-meta').textContent = (q.kind?q.kind+' · ':'')+q.ref+' · published '+meta;
+    row.querySelector('.rq-meta').textContent = q.ref+' · published '+meta;
     row.querySelector('.rq-copy').addEventListener('click', function(){
       var btn = this;
       function ok(){ btn.textContent='Copied!'; setTimeout(function(){ btn.textContent='Copy link'; }, 1600); }
