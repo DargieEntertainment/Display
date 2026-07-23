@@ -282,6 +282,47 @@ function readFileAsDataURL(file){
     r.readAsDataURL(file);
   });
 }
+/* ---------- Vimeo shape detection (so overlays match the real video, no black bars) ---------- */
+var VRATIO_CACHE = {};
+function fetchVimeoRatio(rawUrl){
+  var key = String(rawUrl||'').trim();
+  if(!key) return Promise.resolve(null);
+  if(VRATIO_CACHE[key] !== undefined) return Promise.resolve(VRATIO_CACHE[key]);
+  var api = 'https://vimeo.com/api/oembed.json?url=' + encodeURIComponent(key);
+  return fetch(api).then(function(r){
+    if(!r.ok) throw new Error('lookup failed');
+    return r.json();
+  }).then(function(j){
+    var w = +j.width, h = +j.height;
+    var ratio = (w>0 && h>0) ? (w/h) : null;
+    VRATIO_CACHE[key] = ratio;
+    return ratio;
+  }).catch(function(){
+    VRATIO_CACHE[key] = null;
+    return null;
+  });
+}
+function shapeName(r){
+  if(!r) return '';
+  if(r >= 1.15) return 'landscape';
+  if(r >= 0.85) return 'square';
+  return 'portrait';
+}
+/* fills in any missing video shapes before building, with a safety timeout */
+function withRatios(d, cb){
+  var pending = d.sections.filter(function(s){ return s.vimeo && typeof s.vratio !== 'number'; });
+  if(!pending.length){ cb(); return; }
+  var left = pending.length, done = false;
+  function finish(){ if(!done){ done = true; cb(); } }
+  var guard = setTimeout(finish, 4000);
+  pending.forEach(function(s){
+    fetchVimeoRatio(s.vimeoRaw).then(function(r){
+      if(r) s.vratio = r;
+    }).catch(function(){}).then(function(){
+      if(--left <= 0){ clearTimeout(guard); finish(); }
+    });
+  });
+}
 function pad2(x){ return (x<10?'0':'')+x; }
 var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function ordinal(n){
@@ -479,8 +520,19 @@ function addSection(prefill){
 
   var vin = card.querySelector('.s-vimeo'), vh = card.querySelector('.vhint');
   vin.addEventListener('input', function(){
+    card._vratio = null;
     if(!vin.value.trim()){ vh.textContent=''; vh.className='vhint'; return; }
-    if(vimeoSrc(vin.value)){ vh.textContent='✓ Vimeo link recognised'; vh.className='vhint ok'; }
+    if(vimeoSrc(vin.value)){
+      vh.textContent='✓ Vimeo link recognised'; vh.className='vhint ok';
+      var typed = vin.value.trim();
+      fetchVimeoRatio(typed).then(function(r){
+        if(vin.value.trim() !== typed) return;   // link changed meanwhile
+        if(r){
+          card._vratio = r;
+          vh.textContent = '✓ Vimeo link recognised · '+shapeName(r)+' video';
+        }
+      });
+    }
     else { vh.textContent='This doesn\u2019t look like a Vimeo link — expected something like vimeo.com/123456789'; vh.className='vhint bad'; }
   });
 
@@ -572,7 +624,8 @@ function collect(){
       caption: card.querySelector('.s-caption').value.trim(),
       photos: (card._photos || []).slice(),
       vimeo: vimeoSrc(card.querySelector('.s-vimeo').value),
-      vimeoRaw: card.querySelector('.s-vimeo').value.trim()
+      vimeoRaw: card.querySelector('.s-vimeo').value.trim(),
+      vratio: (typeof card._vratio === 'number' ? card._vratio : undefined)
     };
     if(s.photos === undefined) s.photos = [];
     var catSel = card.querySelector('.s-cat');
@@ -661,14 +714,19 @@ function buildMedia(s){
             '</figure>';
   } else {
     // video only
-    inner = '<figure class="media-card"><div class="vwrap"><iframe src="'+esc(s.vimeo)+'" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="'+esc(s.caption||s.head||'Video')+'"></iframe></div></figure>';
+    var vro = (typeof s.vratio === 'number' && s.vratio > 0.2 && s.vratio < 5) ? s.vratio : (16/9);
+    var vstyle = vro < 0.85 ? ' style="max-width:62%;margin:0 auto"' : '';
+    inner = '<figure class="media-card"'+vstyle+'><div class="vwrap" style="padding-top:'+(100/vro).toFixed(3)+'%"><iframe src="'+esc(s.vimeo)+'" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="'+esc(s.caption||s.head||'Video')+'"></iframe></div></figure>';
   }
 
   var pip = '';
   if(hasPhotos && hasVideo){
-    pip = '<div class="pip">'+
+    var vr = (typeof s.vratio === 'number' && s.vratio > 0.2 && s.vratio < 5) ? s.vratio : (16/9);
+    var vcls = vr >= 1.15 ? 'vland' : (vr >= 0.85 ? 'vsq' : 'vport');
+    var expw = vr >= 1 ? 100 : Math.round(vr*100);
+    pip = '<div class="pip '+vcls+'" style="--expw:'+expw+'%">'+
           '<button type="button" class="pip-toggle" aria-label="Expand video" title="Expand video">&#10530;</button>'+
-          '<div class="vwrap"><iframe data-src="'+esc(s.vimeo)+'&autoplay=1&muted=1" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="'+esc(s.head||'Video')+'"></iframe></div></div>';
+          '<div class="vwrap" style="padding-top:'+(100/vr).toFixed(3)+'%"><iframe data-src="'+esc(s.vimeo)+'&autoplay=1&muted=1" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="'+esc(s.head||'Video')+'"></iframe></div></div>';
   }
 
   return '<div class="media'+(pip?' has-pip':'')+'">'+
@@ -1009,14 +1067,16 @@ function buildOutput(d){
   '.cnav.next{left:64px}\n'+
   '.ccount{position:absolute;top:14px;right:14px;z-index:3;background:rgba(13,10,18,.6);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:5px 14px;font-size:12px;letter-spacing:.12em;color:var(--soft);font-variant-numeric:tabular-nums}\n'+
   /* picture-in-picture video over photos */
-  '.pip{position:absolute;right:-22px;bottom:-34px;width:78%;min-width:320px;border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.14),0 0 30px rgba(240,29,79,.22);z-index:5;background:#000;transition:width .35s ease,right .35s ease,left .35s ease,bottom .35s ease,top .35s ease,border-radius .35s ease}\n'+
+  '.pip{position:absolute;right:-10%;bottom:-12%;width:78%;border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.14),0 0 30px rgba(240,29,79,.22);z-index:5;background:#000;transition:width .35s ease,right .35s ease,left .35s ease,bottom .35s ease,top .35s ease,border-radius .35s ease}\n'+
+  '.pip.vsq{width:54%}\n'+
+  '.pip.vport{width:32%}\n'+
   '.scene.alt .pip{right:auto;left:-22px}\n'+
   '.pip-toggle{position:absolute;top:10px;right:10px;z-index:7;width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.35);background:rgba(13,10,18,.6);backdrop-filter:blur(6px);color:#fff;font-size:16px;line-height:1;cursor:pointer;transition:background .2s,border-color .2s}\n'+
   '.pip-toggle:hover{background:var(--red);border-color:var(--red)}\n'+
-  '.media .pip.expanded{right:0;bottom:0;width:100%;min-width:0;border-radius:22px;z-index:6}\n'+
+  '.media .pip.expanded{right:0;bottom:0;width:var(--expw,100%);min-width:0;border-radius:22px;z-index:6}\n'+
   '.scene.alt .media .pip.expanded{left:0;right:auto}\n'+
   '.media.has-pip{margin-bottom:30px}\n'+
-  '.media.has-pip .caption{padding-top:52px}\n'+
+  '.media.has-pip .caption{padding-top:64px}\n'+
   '.caption{font-size:12.5px;letter-spacing:.05em;color:var(--grey);padding:14px 6px 0;position:relative;z-index:1}\n'+
   '.scene-text .tag{margin-bottom:18px}\n'+
   '.scene-text h2{font-family:\'Unbounded\',sans-serif;font-weight:600;font-size:clamp(22px,2.6vw,30px);line-height:1.25;margin:0 0 18px;color:var(--white)}\n'+
@@ -1051,6 +1111,8 @@ function buildOutput(d){
   'footer .sep{margin:0 12px;color:var(--red)}\n'+
   '@media(max-width:780px){.scene-grid,.scene.alt .scene-grid{grid-template-columns:1fr;gap:34px}.scene.alt .media{order:0}.scene.alt .scene-text{order:0}.scene{padding:54px 0}.ghost{font-size:96px;top:4px}.tile-accent{width:84px;height:84px;top:-18px;left:-14px}.scene.alt .tile-accent{bottom:-18px;right:-14px}'+
   '.pip,.scene.alt .pip{position:static;width:100%;min-width:0;margin-top:16px;right:auto;left:auto}.pip-toggle{display:none}'+
+  '.pip.vport,.scene.alt .pip.vport{width:66%;margin-left:auto;margin-right:auto}'+
+  '.pip.vsq,.scene.alt .pip.vsq{width:84%;margin-left:auto;margin-right:auto}'+
   '.media.has-pip{margin-bottom:0}.media.has-pip .caption,.scene.alt .media.has-pip .caption{max-width:none;margin-left:0;padding-top:14px}'+
   '.topbar{padding:14px 16px}.topbar.scrolled{padding:10px 16px}'+
   '.topbar img{height:auto;width:min(320px,80vw)}.topbar.scrolled img{height:44px;width:auto}'+
@@ -1090,20 +1152,29 @@ function generate(mode){
   var err = validate(d);
   if(err){ statusEl.textContent = err; statusEl.className = 'status err'; return; }
   statusEl.className = 'status';
-  var html = buildOutput(d);
-  var blob = new Blob([html], {type:'text/html'});
-  var url = URL.createObjectURL(blob);
+  statusEl.textContent = 'Preparing…';
+  // open the preview tab now, while we still have the user's click, then fill it once ready
+  var tab = null;
   if(mode==='preview'){
-    window.open(url, '_blank');
-    statusEl.textContent = 'Preview opened in a new tab. If nothing appeared, allow pop-ups for this page.';
-  } else {
-    var a = document.createElement('a');
-    a.href = url; a.download = makeSlug(d) + '.html';
-    document.body.appendChild(a); a.click(); a.remove();
-    var kb = Math.round(blob.size/1024);
-    statusEl.textContent = 'Done — "'+makeSlug(d)+'.html" downloaded ('+(kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB')+').';
+    try{ tab = window.open('', '_blank'); }catch(e){}
+    if(tab){ try{ tab.document.write('<title>Preparing preview…</title><body style="background:#0D0A12;color:#EFEAF2;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div>Preparing preview…</div></body>'); }catch(e){} }
   }
-  setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+  withRatios(d, function(){
+    var html = buildOutput(d);
+    var blob = new Blob([html], {type:'text/html'});
+    var url = URL.createObjectURL(blob);
+    if(mode==='preview'){
+      if(tab && !tab.closed){ tab.location = url; statusEl.textContent = 'Preview opened in a new tab.'; }
+      else { window.open(url, '_blank'); statusEl.textContent = 'Preview opened in a new tab. If nothing appeared, allow pop-ups for this page.'; }
+    } else {
+      var a = document.createElement('a');
+      a.href = url; a.download = makeSlug(d) + '.html';
+      document.body.appendChild(a); a.click(); a.remove();
+      var kb = Math.round(blob.size/1024);
+      statusEl.textContent = 'Done — "'+makeSlug(d)+'.html" downloaded ('+(kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB')+').';
+    }
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+  });
 }
 document.getElementById('previewBtn').addEventListener('click', function(){ generate('preview'); });
 document.getElementById('downloadBtn').addEventListener('click', function(){ generate('download'); });
@@ -1175,11 +1246,16 @@ function publish(){
   var siteBase = 'https://'+owner.toLowerCase()+'.github.io/' +
                  (repo.toLowerCase()===owner.toLowerCase()+'.github.io' ? '' : repo+'/');
   var liveUrl = siteBase + path;
+
+  setStatus('Preparing…');
+  // open the results tab now, while we still have the user's click
+  var tab = null;
+  try{ tab = window.open('', '_blank'); if(tab) tab.document.write('<title>Publishing…</title><body style="background:#0D0A12;color:#EFEAF2;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div>Publishing — this tab will load it shortly…</div></body>'); }catch(e){}
+  withRatios(d, function(){ publishBuilt(d, apiUrl, headers, branch, liveUrl, fname, owner, repo, tab); });
+}
+function publishBuilt(d, apiUrl, headers, branch, liveUrl, fname, owner, repo, tab){
   var html = buildOutput(d);
 
-  // open a tab NOW (user gesture) so popup blockers allow it; navigate it when live
-  var tab = null;
-  try{ tab = window.open('', '_blank'); if(tab) tab.document.write('<title>Publishing quote…</title><body style="background:#0D0A12;color:#EFEAF2;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div>Publishing your quote — this tab will load it shortly…</div></body>'); }catch(e){}
 
   var publishBtn = document.getElementById('publishBtn');
   publishBtn.disabled = true;
