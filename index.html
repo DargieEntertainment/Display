@@ -111,7 +111,7 @@
       </select>
     </div>
     <h1 id="builderTitle">Quote Builder</h1>
-    <p>Fill in the details below, then generate a webpage to copy/paste into an email. The Dargie logo and brand styling are built in — photos are embedded automatically and videos play from Vimeo links, so the file stays small.</p>
+    <p>Fill in the details below, then generate a webpage to copy/paste into an email. The Dargie logo and brand styling are built in — photos are embedded automatically and videos play from Vimeo or YouTube links, so the file stays small.</p>
   </header>
 
   <!-- STEP 1 -->
@@ -289,6 +289,31 @@ function vimeoSrc(url){
   else src += '?';
   return src + 'title=0&byline=0&portrait=0&dnt=1&loop=1';
 }
+function youtubeId(url){
+  url = String(url||'').trim();
+  if(!url) return null;
+  var m = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+function youtubeSrc(url){
+  var id = youtubeId(url);
+  if(!id) return null;
+  return 'https://www.youtube.com/embed/'+id+'?rel=0&modestbranding=1&playsinline=1&loop=1&playlist='+id;
+}
+/* returns a normalised video object {provider, src} for either platform, or null */
+function videoInfo(url){
+  var v = vimeoSrc(url);
+  if(v) return { provider:'vimeo', src:v };
+  var y = youtubeSrc(url);
+  if(y) return { provider:'youtube', src:y };
+  return null;
+}
+/* the extra params that make a corner video autoplay muted & silent, per platform */
+function autoplayParams(provider){
+  return provider==='youtube' ? '&autoplay=1&mute=1&controls=0' : '&autoplay=1&muted=1';
+}
+/* is this a YouTube Short? (portrait) — used as a shape hint when oEmbed can't be reached */
+function isYouTubeShort(url){ return /youtube\.com\/shorts\//.test(String(url||'')); }
 function readFileAsDataURL(file){
   return new Promise(function(res,rej){
     var r = new FileReader();
@@ -297,12 +322,19 @@ function readFileAsDataURL(file){
     r.readAsDataURL(file);
   });
 }
-/* ---------- Vimeo shape detection (so overlays match the real video, no black bars) ---------- */
+/* ---------- video shape detection (so overlays match the real video, no black bars) ---------- */
 var VRATIO_CACHE = {};
 function fetchVimeoRatio(rawUrl){
   var key = String(rawUrl||'').trim();
   if(!key) return Promise.resolve(null);
   if(VRATIO_CACHE[key] !== undefined) return Promise.resolve(VRATIO_CACHE[key]);
+  // YouTube: oEmbed is unreliable from the browser (CORS) and usually reports 16:9 anyway.
+  // Shorts are portrait; everything else defaults to 16:9.
+  if(youtubeId(key)){
+    var yr = isYouTubeShort(key) ? (9/16) : (16/9);
+    VRATIO_CACHE[key] = yr;
+    return Promise.resolve(yr);
+  }
   var api = 'https://vimeo.com/api/oembed.json?url=' + encodeURIComponent(key);
   return fetch(api).then(function(r){
     if(!r.ok) throw new Error('lookup failed');
@@ -496,8 +528,8 @@ function addSection(prefill){
     '<div class="thumbs"></div>'+
     '<label>Photo caption <span class="opt">(optional — shown beneath the photos)</span></label>'+
     '<input type="text" class="s-caption" placeholder="e.g. The full company on stage">'+
-    '<label>Vimeo link <span class="opt">(optional — if photos are also added, the video floats over their corner and can be expanded with a click)</span></label>'+
-    '<input type="url" class="s-vimeo" placeholder="https://vimeo.com/123456789">'+
+    '<label>Video link <span class="opt">(optional — Vimeo or YouTube; if photos are also added, the video floats over their corner and can be expanded with a click)</span></label>'+
+    '<input type="url" class="s-vimeo" placeholder="https://vimeo.com/… or https://youtube.com/…">'+
     '<div class="vhint"></div>'+
     '<label>Text</label>'+
     '<textarea class="s-body" placeholder="The story that goes with this offering."></textarea>';
@@ -574,19 +606,22 @@ function addSection(prefill){
   var vin = card.querySelector('.s-vimeo'), vh = card.querySelector('.vhint');
   vin.addEventListener('input', function(){
     card._vratio = null;
-    if(!vin.value.trim()){ vh.textContent=''; vh.className='vhint'; return; }
-    if(vimeoSrc(vin.value)){
-      vh.textContent='✓ Vimeo link recognised'; vh.className='vhint ok';
-      var typed = vin.value.trim();
+    var raw = vin.value.trim();
+    if(!raw){ vh.textContent=''; vh.className='vhint'; return; }
+    var info = videoInfo(raw);
+    if(info){
+      var label = info.provider==='youtube' ? 'YouTube' : 'Vimeo';
+      vh.textContent='✓ '+label+' link recognised'; vh.className='vhint ok';
+      var typed = raw;
       fetchVimeoRatio(typed).then(function(r){
         if(vin.value.trim() !== typed) return;   // link changed meanwhile
         if(r){
           card._vratio = r;
-          vh.textContent = '✓ Vimeo link recognised · '+shapeName(r)+' video';
+          vh.textContent = '✓ '+label+' link recognised · '+shapeName(r)+' video';
         }
       });
     }
-    else { vh.textContent='This doesn\u2019t look like a Vimeo link — expected something like vimeo.com/123456789'; vh.className='vhint bad'; }
+    else { vh.textContent='This doesn\u2019t look like a Vimeo or YouTube link.'; vh.className='vhint bad'; }
   });
 
   card.querySelector('.del').addEventListener('click', function(){ card.remove(); if(qrow) qrow.remove(); recalc(); });
@@ -671,13 +706,16 @@ applyIncludeQuote();
 function collect(){
   var sections = [];
   sectionsEl.querySelectorAll('.section-card').forEach(function(card){
+    var _vraw = card.querySelector('.s-vimeo').value.trim();
+    var _vinfo = videoInfo(_vraw);
     var s = {
       head: card.querySelector('.s-head').value.trim(),
       body: card.querySelector('.s-body').value,
       caption: card.querySelector('.s-caption').value.trim(),
       photos: (card._photos || []).slice(),
-      vimeo: vimeoSrc(card.querySelector('.s-vimeo').value),
-      vimeoRaw: card.querySelector('.s-vimeo').value.trim(),
+      vimeo: _vinfo ? _vinfo.src : null,
+      vprovider: _vinfo ? _vinfo.provider : null,
+      vimeoRaw: _vraw,
       vratio: (typeof card._vratio === 'number' ? card._vratio : undefined)
     };
     if(s.photos === undefined) s.photos = [];
@@ -745,7 +783,7 @@ function validate(d){
     if(!s.head) return 'Act '+(i+1)+': add a heading'+(MODE==='quote'?' — it becomes the quote line description.':'.');
     if(MODE==='presentation' && s.catOther && !s.cat) return 'Act '+(i+1)+': type a category name for "Other".';
     if(s.vimeoRaw && !s.vimeo)
-      return 'Act '+(i+1)+': the Vimeo link isn\u2019t recognised. Expected something like vimeo.com/123456789.';
+      return 'Act '+(i+1)+': the video link isn\u2019t recognised. Paste a Vimeo or YouTube link.';
   }
   if(MODE==='quote' && d.quote.include){
     for(var k=0;k<d.quote.items.length;k++){
@@ -793,7 +831,7 @@ function buildMedia(s){
     var expw = vr >= 1 ? 100 : Math.round(vr*100);
     pip = '<div class="pip '+vcls+'" style="--expw:'+expw+'%">'+
           '<button type="button" class="pip-toggle" aria-label="Expand video" title="Expand video">&#10530;</button>'+
-          '<div class="vwrap" style="padding-top:'+(100/vr).toFixed(3)+'%"><iframe data-src="'+esc(s.vimeo)+'&autoplay=1&muted=1" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="'+esc(s.head||'Video')+'"></iframe></div></div>';
+          '<div class="vwrap" style="padding-top:'+(100/vr).toFixed(3)+'%"><iframe data-src="'+esc(s.vimeo)+autoplayParams(s.vprovider)+'" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="'+esc(s.head||'Video')+'"></iframe></div></div>';
   }
 
   return '<div class="media'+(pip?' has-pip':'')+'">'+
