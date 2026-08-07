@@ -332,6 +332,36 @@ function readFileAsDataURL(file){
     r.readAsDataURL(file);
   });
 }
+/* Resize a photo to a sensible max edge and re-encode as JPEG so embedded files stay small.
+   Falls back to the original data URL if anything goes wrong (e.g. odd format, decode failure). */
+var IMG_MAX_EDGE = 1600;   // longest side, in px — plenty sharp for full-screen phone/laptop viewing
+var IMG_QUALITY  = 0.82;   // JPEG quality
+function compressImage(file){
+  return readFileAsDataURL(file).then(function(dataUrl){
+    // leave non-raster or tiny SVGs alone
+    if(/^data:image\/svg/i.test(dataUrl) || /^data:image\/gif/i.test(dataUrl)) return dataUrl;
+    return new Promise(function(resolve){
+      var img = new Image();
+      img.onload = function(){
+        try{
+          var w = img.naturalWidth, h = img.naturalHeight;
+          if(!w || !h){ resolve(dataUrl); return; }
+          var scale = Math.min(1, IMG_MAX_EDGE / Math.max(w, h));
+          var tw = Math.round(w*scale), th = Math.round(h*scale);
+          var canvas = document.createElement('canvas');
+          canvas.width = tw; canvas.height = th;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, tw, th);
+          var out = canvas.toDataURL('image/jpeg', IMG_QUALITY);
+          // keep whichever is smaller — never make a file bigger than it started
+          resolve(out && out.length < dataUrl.length ? out : dataUrl);
+        }catch(e){ resolve(dataUrl); }
+      };
+      img.onerror = function(){ resolve(dataUrl); };
+      img.src = dataUrl;
+    });
+  });
+}
 /* ---------- video shape detection (so overlays match the real video, no black bars) ---------- */
 var VRATIO_CACHE = {};
 function fetchVimeoRatio(rawUrl){
@@ -486,7 +516,7 @@ document.title = 'Dargie ' + MODES[MODE];
     box.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){e.preventDefault();input.click();} });
     input.addEventListener('change', function(){
       var f = input.files[0]; if(!f) return;
-      readFileAsDataURL(f).then(function(d){ window._splashData = d; renderSplashThumb(); input.value=''; });
+      compressImage(f).then(function(d){ window._splashData = d; renderSplashThumb(); input.value=''; });
     });
     renderSplashThumb();
   }
@@ -535,6 +565,7 @@ function addSection(prefill){
     '<input type="text" class="s-head" placeholder="e.g. The Golden Hour Cabaret">'+
     '<label>Photos <span class="opt">(optional — add as many as you like; shown as a square gallery viewers click through, in the order below)</span></label>'+
     '<div class="filebox s-photobox" tabindex="0" role="button"><input type="file" class="s-photo" accept="image/*" multiple><span>Click to add photos</span></div>'+
+    '<div class="photo-note" hidden style="font-size:12.5px;color:var(--red);margin:6px 0 0">Optimising…</div>'+
     '<div class="thumbs"></div>'+
     '<label>Photo caption <span class="opt">(optional — shown beneath the photos)</span></label>'+
     '<input type="text" class="s-caption" placeholder="e.g. The full company on stage">'+
@@ -606,10 +637,13 @@ function addSection(prefill){
   pin.addEventListener('change', function(){
     var files = Array.prototype.slice.call(pin.files);
     if(!files.length) return;
-    Promise.all(files.map(readFileAsDataURL)).then(function(datas){
+    var note = card.querySelector('.photo-note');
+    if(note){ note.textContent = 'Optimising '+files.length+(files.length>1?' photos…':' photo…'); note.hidden = false; }
+    Promise.all(files.map(compressImage)).then(function(datas){
       card._photos = card._photos.concat(datas);
       renderThumbs();
       pin.value = '';
+      if(note){ note.hidden = true; }
     });
   });
 
@@ -1199,8 +1233,9 @@ function buildOutput(d){
   // ----- optional opening splash -----
   var splashHtml = '';
   if(d.splashImg){
+    var splashFromCover = (d.mode==='presentation');   // reuse the cover photo — don't embed it twice
     splashHtml =
-      '<div id="splash" aria-hidden="true">'+
+      '<div id="splash" aria-hidden="true"'+(splashFromCover?' data-fromcover="1"':'')+'>'+
       '<span class="sp-tile t1" style="--r:-9deg"></span><span class="sp-tile t2" style="--r:7deg"></span><span class="sp-tile t3" style="--r:15deg"></span>'+
       '<span class="sp-spark" style="top:16%;left:13%;width:7px;height:7px;animation-delay:0s"></span>'+
       '<span class="sp-spark" style="top:26%;left:82%;width:5px;height:5px;animation-delay:.7s"></span>'+
@@ -1208,7 +1243,7 @@ function buildOutput(d){
       '<span class="sp-spark" style="top:78%;left:88%;width:5px;height:5px;animation-delay:.4s"></span>'+
       '<span class="sp-spark" style="top:44%;left:5%;width:4px;height:4px;animation-delay:2.4s"></span>'+
       '<span class="sp-spark" style="top:56%;left:94%;width:5px;height:5px;animation-delay:1.6s"></span>'+
-      '<div class="sp-glow"><div class="sp-frame"><img alt="" src="'+d.splashImg+'"></div></div></div>';
+      '<div class="sp-glow"><div class="sp-frame"><img alt=""'+(splashFromCover?'':' src="'+d.splashImg+'"')+'></div></div></div>';
   }
 
   var extraJs =
@@ -1226,6 +1261,9 @@ function buildOutput(d){
       : "") +
     (d.splashImg ?
       "(function(){var sp=document.getElementById('splash');if(!sp)return;"+
+      "if(sp.getAttribute('data-fromcover')){var im=sp.querySelector('.sp-frame img');"+
+      "var cov=document.querySelector('.cover-wrap .slide.on img, .cover-wrap .slide img, .cover-wrap .ph img, .cover-wrap img');"+
+      "if(cov&&im){im.src=cov.getAttribute('src');}else{sp.parentNode.removeChild(sp);return;}}"+
       "document.body.classList.add('splashing');var closed=false;"+
       "function done(){if(closed)return;closed=true;sp.classList.add('out');document.body.classList.remove('splashing');"+
       "setTimeout(function(){if(sp.parentNode)sp.parentNode.removeChild(sp);},1000);}"+
